@@ -228,6 +228,38 @@ prompt — arriving during the grace period of a cold start.
 
 ---
 
+## 2026-07-22 — Deployment: Vercel via Git, and why vercel.json looks bare
+
+**`vercel.json` rejects unknown properties.** Adding `comment` keys to document the header
+rules failed validation with `headers[0] should NOT have additional property comment`. JSON
+has no comment syntax and Vercel's schema is strict, so the reasoning lives here instead:
+
+- `/mediapipe/wasm/*` and `/models/*` — cached one year, immutable. A first visit downloads
+  ~15MB (one WASM variant plus the 3.7MB face model). Without this it repeats on every
+  visit, which on a candidate's mobile data is slow and expensive. Both paths are
+  version-pinned, so a year is safe.
+- `/assets/*` — Vite fingerprints these filenames, so a new build produces new URLs.
+- `/` — explicitly `must-revalidate`. If the entry point were cached, a redeploy would
+  strand phones on the old build with no way to refresh out of it.
+
+**Deploy via Git integration, not the CLI.** Three CLI attempts failed in sequence:
+
+1. `vercel@39.4.2` — ran on Node 20.11 but its localhost-redirect login was **removed by
+   Vercel on 2026-02-26**. Redirected to a changelog page instead of authenticating.
+2. `vercel@latest` (56.5.0) — needs Node `^20.19 || >=22.12`; transitive deps (`rolldown`,
+   `oxc-transform`, `undici`) broke the install and left no bin shim.
+3. `vercel@41.3.2 --future` — device flow started, then failed with `Invalid Compact JWS`.
+   Almost certainly a Sept-2025 client against July-2026 servers.
+
+Git integration sidesteps all of it: Vercel builds on their own infrastructure with current
+Node, so the local Node version stops mattering. It also auto-deploys on push.
+
+**Lesson:** when a tool's version constraints have already bitten twice, stop looking for a
+compatible version and look for a path that does not need the tool. Two of those three
+attempts were wasted user time.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub
