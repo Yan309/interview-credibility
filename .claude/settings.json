@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(npm run test:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npx tsc --noEmit:*)",
+      "Bash(npx vitest run:*)",
+      "PowerShell(npm test*)",
+      "PowerShell(npm run test*)",
+      "PowerShell(npm run typecheck*)",
+      "PowerShell(npm run build*)",
+      "PowerShell(npx tsc --noEmit*)",
+      "Read(./src/**)",
+      "Read(./tests/**)",
+      "Read(./docs/**)",
+      "Write(./src/**)",
+      "Write(./tests/**)",
+      "Write(./docs/**)",
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:developers.google.com)"
+    ],
+    "ask": [
+      "Write(./package.json)",
+      "Write(./PRD.md)",
+      "Bash(npm install:*)",
+      "PowerShell(npm install*)"
+    ],
+    "deny": [
+      "Read(./fixtures/video/**)",
+      "Write(./fixtures/video/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(git add *.webm)",
+      "Bash(git add *.mp4)",
+      "Bash(curl:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/session-context.mjs"],
+            "timeout": 10,
+            "statusMessage": "Reading board state..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-core.mjs"],
+            "timeout": 15,
+            "statusMessage": "Checking privacy invariant..."
+          }
+        ]
+      }
+    ]
+  }
+}

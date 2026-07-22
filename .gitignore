@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.vite/
+*.local
+.DS_Store
+Thumbs.db
+
+# Machine-specific approvals. .claude/settings.json IS committed — it is the
+# deliberate project config. This one is auto-accumulated noise.
+.claude/settings.local.json
+
+# Derived assets, reproducible from npm scripts. The model alone is ~3.7MB.
+# `npm run sync:wasm` (automatic) and `npm run fetch:model` (one-time) rebuild these.
+public/mediapipe/
+public/models/
+
+# Never commit test footage. Candidate video does not belong in git.
+fixtures/video/
+*.webm
+*.mp4

@@ -1,0 +1,36 @@
+{
+  "name": "interview-credibility",
+  "version": "0.1.0",
+  "description": "Camera presence, absence and liveness detection for live interview sessions.",
+  "type": "module",
+  "private": true,
+  "main": "./src/core/index.ts",
+  "scripts": {
+    "sync:wasm": "node scripts/sync-mediapipe.mjs",
+    "fetch:model": "node scripts/fetch-model.mjs",
+    "assets": "npm run sync:wasm && npm run fetch:model",
+    "predev": "npm run assets",
+    "prebuild": "npm run assets",
+    "dev": "vite",
+    "dev:tunnel": "vite --mode tunnel",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "deploy": "vercel deploy --prod",
+    "deploy:preview": "vercel deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.18"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vercel": "41.3.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

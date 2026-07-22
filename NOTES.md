@@ -1,0 +1,239 @@
+# Working Notes
+
+Durable findings that belong to the project rather than to a conversation. Append,
+don't rewrite. Calibration results go in [docs/test-matrix.md](docs/test-matrix.md);
+this file is for everything else worth carrying forward.
+
+Format: `## YYYY-MM-DD — topic`, then what was found and what it means for the plan.
+
+---
+
+## 2026-07-21 — Scaffolding decisions
+
+**Vite pinned to 6.x.** Node here is 20.11.1; Vite 7 requires ≥20.19. Bumping Vite
+without bumping Node breaks the dev server. Recorded because it will look like an
+arbitrary pin later.
+
+**State machine built before the camera layer.** It decides whether an interview ends,
+it holds the Phase 4 risk, and it tests without hardware. The camera and MediaPipe
+layers are stubs behind real interfaces, so the pipeline shape is already fixed.
+
+**One test failed on first run and the fixture was wrong, not the code.** The
+"requires two dead signals" case had been written with zero pose *and* zero motion —
+two dead signals, so flagging was correct. Worth remembering during IC-30: it is easy
+to construct a liveness fixture that proves the opposite of what it intends.
+
+**Not a git repo yet.** `git init` before P1 — file checkpointing and any review
+tooling both assume version control, and the calibration work in P4 is exactly what
+you want to be able to roll back.
+
+---
+
+## 2026-07-22 — Agent operations setup
+
+**The privacy hook failed open on first test.** PowerShell prepends a UTF-8 BOM when
+piping a string to a process; `JSON.parse` threw on it, the `catch` swallowed the
+error, and the guard exited 0 while reporting nothing. It looked like it was working.
+
+Fixed by stripping the BOM and making a parse failure exit 1 with a stderr message
+instead of exiting 0 silently. The general lesson is worth keeping: **a guard that
+fails open silently is worse than no guard**, because it manufactures confidence. Any
+future hook added here should be tested against its violation case, not just its
+pass case.
+
+**Hook scripts are node, not shell.** The Claude Code docs use `jq` pipelines, which
+are not portable to this Windows box. Node is already a dependency and behaves
+identically everywhere.
+
+---
+
+## 2026-07-22 — P1: FaceLandmarker returns no confidence score
+
+**The finding.** `FaceLandmarkerResult` is `{ faceLandmarks, faceBlendshapes,
+facialTransformationMatrixes }` — there is **no per-face detection score**. The PRD and
+the original `DetectionSample` design assumed one and gated presence on
+`confidence >= minFaceConfidence`.
+
+MediaPipe applies `minFaceDetectionConfidence` / `minFacePresenceConfidence` internally
+and returns only faces that already passed. A returned face *is* a confident one.
+
+**What changed.** `minFaceConfidence` is now pushed **down** into the model options at
+`init()` rather than compared in the state machine, and the detector reports
+`confidence: 1` for a returned face, `0` for none. The config knob still means what it
+says; it just takes effect one layer earlier.
+
+**Consequence to remember during P4:** for the MediaPipe path the machine's
+`confidence >= minFaceConfidence` comparison is now always true when a face is present.
+It still does real work for `ScriptedDetector` and the tests. Anyone tuning
+`minFaceConfidence` and watching for the machine to behave differently will be confused
+unless they know the gate moved. If finer-grained confidence is ever needed, `FaceDetector`
+(BlazeFace) *does* return a score — at the cost of a second model, which §5 of the PRD
+rejected for CPU reasons.
+
+**Also from this pass:**
+
+- The transformation matrix `data` is **column-major** — element (row, col) is
+  `data[col * 4 + row]`. Reading it row-major transposes the rotation and silently swaps
+  yaw and pitch. The values still look plausible, which is what makes it dangerous; the
+  unit tests pin the convention.
+- Gimbal lock at |pitch| ≈ 90° would produce `NaN` yaw/roll, which would poison the pose
+  variance and quietly disable the head-pose liveness signal rather than failing loudly.
+  Handled explicitly and tested.
+- Micro-motion is reset to `null` when a face disappears. Carrying it across an absence
+  would make the first frame back read as a huge displacement — i.e. as proof of life.
+- **WASM is served locally**, copied from `node_modules` by `npm run sync:wasm` (wired to
+  predev/prebuild). An interview that fails because someone else's CDN is unreachable
+  fails for a reason the candidate cannot do anything about.
+- The `face_landmarker.task` model (~3.7MB) is **not** on npm and must be fetched once via
+  `npm run fetch:model`. Deliberately a separate explicit command, not a postinstall hook —
+  a build that quietly reaches out to a Google bucket is what this project's privacy
+  posture says not to do.
+
+---
+
+## 2026-07-22 — First live run: 9fps was the throttle, not the hardware
+
+GPU delegate loaded successfully on first try. Measured 9fps against a `targetFps` of 10,
+which initially reads as "we are 10% short of the gate."
+
+It was not a performance limit. Camera frames arrive on a ~33ms grid; the throttle tested
+`elapsed >= 100ms`, which rejects the frame at 100ms and waits for the one at 133ms —
+a real ceiling of ~7.5fps regardless of how fast detection runs. Fixed with a 20%
+tolerance so a frame landing fractionally early still counts, snapping sampling back onto
+the intended cadence.
+
+**Worth remembering for IC-39:** the headline fps number measures the sample loop, not
+detection cost. A throttle artefact and a CPU limit look identical from the outside. When
+benchmarking, compare against `targetFps` first and only then conclude anything about
+load.
+
+---
+
+## 2026-07-22 — The "black preview" was CSS, and a diagnostic lesson
+
+`.prompt { display: grid }` overrides the UA stylesheet's `[hidden] { display: none }`,
+because author rules beat UA rules regardless of specificity. Both the return prompt and
+the ended overlay were therefore painted at full size from page load, at 86% and 95%
+opacity, over the video. The camera, the model and the detection loop were all working
+perfectly the entire time.
+
+Fix: `.prompt[hidden] { display: none; }`.
+
+**The diagnostic lesson is the durable part.** The first probe checked `element.hidden`,
+saw `true`, and concluded the overlays were not the cause — which sent the investigation
+into a wrong hypothesis about GPU/WebGL compositing and cost a full round trip of the
+user's time. `element.hidden` reports the attribute; `getComputedStyle(el).display`
+reports what the browser actually paints. For any "element not visible / wrongly visible"
+question, check computed style, not the property.
+
+Any `hidden` toggle in this project should be paired with a `[hidden]` CSS rule whenever
+the element also has an author `display` declaration.
+
+## 2026-07-22 — Mobile is not in the PRD, and that is a gap
+
+Raised by the question "why does delegate selection exist — most candidates are on normal
+laptops or phones."
+
+The delegate answer is that it is invisible and automatic (try GPU, fall back to CPU), so
+no candidate or integrator ever chooses. But **phones** deserved a real answer and the PRD
+does not have one. Concrete consequences found immediately:
+
+- **`facingMode` was unset**, so a phone could hand us the rear camera. Detection would
+  then report a confident, sustained absence for a candidate sitting right in front of the
+  screen — a false timeout caused entirely by camera selection. Fixed with
+  `facingMode: { ideal: 'user' }`.
+- Still open: iOS Safari behaviour, sustained-detection battery and thermal throttling,
+  orientation changes, and what happens when a phone call interrupts an interview.
+
+PRD §9 assumes a laptop throughout ("mid-range laptop"). If phones are a real interview
+surface, that assumption needs revisiting before P5.
+
+---
+
+## 2026-07-22 — DECISION: lighting timeout may end a session (Invariant 3 amended)
+
+**Owner decision.** Asked what should happen when the lighting-recovery countdown expires,
+with three options and the fairness tradeoff stated. Chose: **end the interview, same as
+absence.**
+
+This amends Invariant 3, which previously said degraded quality must never terminate.
+Recorded here rather than absorbed silently, because the original constraint existed for a
+reason that has not gone away.
+
+**What was implemented**
+
+- `quality:timeout` event and `lightingTimeoutMs` (default 60s, twice the absence timeout —
+  fixing a room takes longer than stepping back into frame).
+- Candidate-facing prompt naming the specific condition, with a live countdown.
+- `qualityTimedOut` kept **separate** from `timedOut` in the session summary. A session
+  ended because a room was dark is a different finding from one ended because the
+  candidate left, and collapsing them would misrepresent the candidate.
+
+**The guard, and why it must not be removed**
+
+The clock runs only while the frame is degraded **and** `faceCount === 0`. A candidate who
+is still detectable despite poor lighting is never escalated — they are demonstrably
+present, so there is nothing to escalate. This was added inside the owner's decision, not
+as a hedge against it: it removes the most unfair failure mode (terminating a visible
+person over their camera quality) while preserving the intent (unusable feeds must
+resolve).
+
+Pinned by `tests/quality-timeout.test.ts`, particularly the "does NOT fire while a face is
+still detectable" case. If that test is ever failing, do not adjust it to pass — the guard
+is the point.
+
+**Residual risk, for the record.** Camera quality correlates with equipment cost and, via
+detector performance, with skin tone. A termination path gated on camera quality will fire
+unevenly across candidates even with the guard in place. `lowLightLumaThreshold` (IC-24)
+therefore stops being just a tuning value and becomes the control that decides who gets
+timed out — it must be calibrated against multiple real people with different skin tones
+before this ships, and raising `lightingTimeoutMs` is always safer than lowering it.
+
+---
+
+## 2026-07-22 — Cold-start bug, and the worse one hiding behind it
+
+**Reported:** a session that opens with nobody in frame goes to ABSENT_PENDING and the
+timer never fires.
+
+**Cause.** `pendingSince` was set at each call site, and the INITIALIZING path forgot.
+The elapsed check then read `this.pendingSince ?? sample.at`, comparing each sample's
+timestamp against itself — always zero, so the grace period could never elapse. The
+machine sat in ABSENT_PENDING for the whole interview: no prompt, no timeout, no error.
+
+Silent-hang failures are the expensive kind. Nothing in the event stream indicated a
+problem, so the module looked healthy while doing nothing.
+
+**Fix.** `transition()` now owns the grace clock, so no call site can omit it, and the
+ABSENT_PENDING branch uses `??=` so it self-heals rather than hanging if the clock is ever
+missing.
+
+**The second bug, which the first was masking.** Fixing the hang broke the existing
+"does not flap at the threshold" test — correctly. The INITIALIZING branch decided
+present/absent using `presenceRecoverRatio` (0.6), not `absenceEnterRatio` (0.2). Any
+merely-marginal opening reading (~0.5 — a flickering detector, a candidate at an angle,
+poor contrast) therefore opened in ABSENT_PENDING. With the clock now running, that
+candidate would be prompted and then timed out **while sitting in front of the camera.**
+
+That is worse than the reported bug, and it was invisible because the hang swallowed it.
+Initialization now enters ABSENT_PENDING only on `ratio < absenceEnterRatio`; ambiguity at
+startup resolves toward present, which is the direction where being wrong is cheap.
+
+**Lesson worth keeping:** when a fix breaks an existing test, check whether the test was
+passing *because* of the bug before adjusting either. Here the failing test was the only
+thing pointing at the more serious defect, and "fixing" the test would have shipped it.
+
+Regression coverage in `tests/starts-absent.test.ts`, including the case that must NOT
+prompt — arriving during the grace period of a cold start.
+
+---
+
+## Open threads
+
+- **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub
+  supports both paths and `stop()` deliberately does not kill tracks it does not own,
+  but the answer decides which path is real.
+- **MediaPipe delegate choice under load** — unmeasured. The detector shares CPU with
+  a live voice agent, and nothing is known yet about how they interact. IC-39.
+- **Return-prompt wording** — unresolved, blocks IC-25. Needs to be neutral; the
+  candidate may have an entirely good reason to be out of frame.

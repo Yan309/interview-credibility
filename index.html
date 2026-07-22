@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1115" />
+    <title>Camera Check</title>
+    <link rel="stylesheet" href="/src/demo/styles.css" />
+  </head>
+  <body>
+    <!-- Embedded webviews (Instagram, Facebook, LinkedIn) either block
+         getUserMedia outright or grant it unreliably. Failing here with an
+         instruction beats failing later with a broken camera. -->
+    <section id="screen-blocked" class="screen" hidden>
+      <div class="screen__inner">
+        <h1>Please open this in your browser</h1>
+        <p>
+          This page needs camera access, which does not work inside apps like
+          Instagram, Facebook or LinkedIn.
+        </p>
+        <p class="screen__hint">
+          Tap the <strong>⋯</strong> or <strong>share</strong> menu at the corner of
+          this screen, then choose <strong>Open in Safari</strong> or
+          <strong>Open in Chrome</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Camera must not initialise on load. iOS in particular ties the
+         permission prompt to a user gesture, and an unexplained prompt on page
+         load is the fastest way to get it denied. -->
+    <section id="screen-landing" class="screen">
+      <div class="screen__inner">
+        <h1>Camera check</h1>
+        <p>
+          This page checks that your camera can see you clearly during an interview.
+          Nothing is recorded, and no video ever leaves your device.
+        </p>
+        <ul class="screen__list">
+          <li>Your browser will ask permission to use the camera.</li>
+          <li>You will see yourself on screen.</li>
+          <li>If you move out of view, a message will ask you to return.</li>
+        </ul>
+        <button id="begin" class="btn btn--primary">Start camera</button>
+      </div>
+    </section>
+
+    <section id="screen-error" class="screen" hidden>
+      <div class="screen__inner">
+        <h1 id="error-title">Something went wrong</h1>
+        <p id="error-detail"></p>
+        <button id="error-retry" class="btn btn--primary">Try again</button>
+      </div>
+    </section>
+
+    <main id="app" hidden>
+      <header class="bar">
+        <h1>Camera check</h1>
+        <span id="state-pill" class="pill pill--idle debug-only">IDLE</span>
+        <span id="fps" class="metric debug-only">— fps</span>
+        <button id="toggle" class="btn">Stop</button>
+      </header>
+
+      <div class="layout">
+        <section class="stage">
+          <div class="video-wrap">
+            <video id="video" autoplay playsinline muted disablepictureinpicture></video>
+            <canvas id="overlay"></canvas>
+
+            <!-- Copy stays neutral and states the cause plainly. The candidate may
+                 have a perfectly good reason to be out of frame or in a dim room;
+                 we are describing what the camera shows, not making an accusation. -->
+            <div id="prompt" class="prompt" hidden>
+              <h2>You are no longer visible</h2>
+              <p>Please return to the camera view to continue the interview.</p>
+              <p class="countdown">
+                This interview will end automatically in <span id="countdown">0:30</span>
+              </p>
+            </div>
+
+            <div id="quality-prompt" class="prompt" hidden>
+              <h2 id="quality-title">Insufficient lighting detected</h2>
+              <p id="quality-detail">
+                The camera image is too dark to confirm that you are present.
+                Please increase the lighting in your room.
+              </p>
+              <p class="countdown">
+                This interview will end automatically in <span id="quality-countdown">1:00</span>
+              </p>
+            </div>
+
+            <div id="ended" class="prompt prompt--ended" hidden>
+              <h2>Interview ended</h2>
+              <p id="ended-detail">
+                This interview ended automatically because the camera did not show a
+                participant for the required period.
+              </p>
+            </div>
+          </div>
+
+          <div id="banner" class="banner" hidden></div>
+        </section>
+
+        <aside class="panel debug-only">
+          <h2>Configuration</h2>
+          <div id="controls" class="controls"></div>
+
+          <h2>Events</h2>
+          <ol id="event-log" class="event-log"></ol>
+
+          <h2>Session summary</h2>
+          <pre id="summary" class="summary">—</pre>
+        </aside>
+      </div>
+    </main>
+
+    <!-- Always reachable. The client has no console; this is how a problem gets
+         reported with enough detail to act on. -->
+    <button id="diagnostics" class="diag-btn">Copy diagnostics</button>
+    <div id="build-stamp" class="build-stamp"></div>
+
+    <script type="module" src="/src/demo/main.ts"></script>
+  </body>
+</html>
