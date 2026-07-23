@@ -260,6 +260,44 @@ attempts were wasted user time.
 
 ---
 
+## 2026-07-24 — Repeated-absence warning system (cohort strikes)
+
+**Requested:** somebody who leaves and returns repeatedly should accrue warnings, with a
+per-cohort limit — panel 3, known 5, internal "etc".
+
+**Design.** New `WarningTracker` in src/core, same shape as the other units. Config gains
+`cohort: 'panel' | 'known' | 'internal'` and `warningLimits: Record<cohort, number>`
+(defaults 3 / 5 / 8 — **internal's 8 is a placeholder; the owner did not give a number,
+confirm it**). Two new events: `warning:issued` (advisory, count of limit) and
+`warnings:exhausted` (a REPORT — like `absence:timeout`, the host decides whether to end).
+
+**Decisions worth remembering:**
+
+- A strike is counted per **escalated** absence (`absence:started`), not per raw
+  look-away. A dip under the grace period never prompted the candidate, so it is not held
+  against them. Tested explicitly.
+- `warnings:exhausted` fires on the crossing to `count === limit`. So panel (limit 3) means
+  the **3rd** absence is the last — 2 warnings shown, then out. If the owner wants "3
+  warnings shown, out on the 4th", that is a one-line change in WarningTracker. **Flagged
+  to owner.**
+- Warnings do **not** reset on a discontinuity (`machine.reset()` for a lid close). A
+  laptop sleep is not a strike. They reset only at `beginSession`.
+- The limit is read live from the config object, so changing cohort in the tuning panel
+  takes effect immediately — same live-mutation pattern the sliders already rely on.
+- `qualityTimedOut` / `timedOut` / `warningsExhausted` are three distinct summary fields.
+  A reviewer must be able to tell "left too long" from "left too often" from "room too
+  dark" — they say different things about the candidate.
+
+## 2026-07-24 — Demo consolidated to a single view
+
+The `?debug=1` split is gone. The instrument view (video + prompts + config + event log +
+live summary) is now the only view; the stripped "clean" view was removed at the owner's
+request (it had layout bugs and the client wants the metrics). `body.debug` is now set
+unconditionally. Consequence: the client sees the config sliders and can move them — an
+accepted tradeoff, since the point is for them to see it working and report detail.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub

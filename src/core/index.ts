@@ -8,6 +8,7 @@ export { PresenceRuntime, type PresenceRuntimeOptions } from './runtime.js';
 export { PresenceMachine } from './presence-machine.js';
 export { LivenessScorer } from './liveness-scorer.js';
 export { QualityMonitor } from './quality-monitor.js';
+export { WarningTracker } from './warning-tracker.js';
 export { SessionSummaryBuilder } from './session-summary.js';
 export { PresenceEmitter, type Unsubscribe } from './emitter.js';
 export { CameraSource, CameraError, toCameraErrorReason, type CameraOptions } from './camera.js';
@@ -35,4 +36,5 @@ export type {
   QualityReason,
   CameraErrorReason,
   LivenessSignal,
+  ConsumerCohort,
 } from './types.js';

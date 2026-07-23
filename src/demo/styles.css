@@ -194,6 +194,16 @@ body.debug .pill.debug-only { display: inline-block !important; }
 .prompt .countdown { color: var(--warn); font-variant-numeric: tabular-nums; margin-top: 0.5rem; }
 .prompt--ended { background: rgba(15, 17, 21, 0.95); }
 
+.warning-line {
+  margin-top: 0.5rem !important;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn) !important;
+  font-size: 0.85rem;
+}
+.warning-line[hidden] { display: none; }
+
 .banner {
   margin-top: 0.75rem;
   padding: 0.6rem 0.8rem;
@@ -231,6 +241,16 @@ body.debug .pill.debug-only { display: inline-block !important; }
 .control__label { color: var(--muted); }
 .control__value { font-variant-numeric: tabular-nums; }
 .control input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.control__select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+.control--choice { margin-bottom: 0.75rem; }
 
 .event-log {
   list-style: none;

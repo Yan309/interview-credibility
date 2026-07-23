@@ -6,6 +6,7 @@ import { LivenessScorer } from './liveness-scorer.js';
 import { PresenceMachine } from './presence-machine.js';
 import { QualityMonitor } from './quality-monitor.js';
 import { SessionSummaryBuilder } from './session-summary.js';
+import { WarningTracker } from './warning-tracker.js';
 import type { PresenceEvent, PresenceState, SessionSummary } from './types.js';
 
 export interface PresenceRuntimeOptions {
@@ -32,6 +33,7 @@ export class PresenceRuntime {
   private readonly machine: PresenceMachine;
   private readonly liveness: LivenessScorer;
   private readonly quality: QualityMonitor;
+  private readonly warnings: WarningTracker;
   private readonly camera: CameraSource;
   private readonly detector: FaceDetector;
   private readonly now: () => number;
@@ -51,6 +53,7 @@ export class PresenceRuntime {
     this.machine = new PresenceMachine(this.config);
     this.liveness = new LivenessScorer(this.config.liveness);
     this.quality = new QualityMonitor(this.config);
+    this.warnings = new WarningTracker(this.config);
     this.camera = new CameraSource({
       ...options.camera,
       onTrackEnded: () => this.handleTrackEnded(),
@@ -240,7 +243,15 @@ export class PresenceRuntime {
     this.machine.setSuspended(this.quality.isDegraded(), sample.at);
 
     events.push(...this.evaluateQualityTimeout(sample));
-    events.push(...this.machine.ingest(sample));
+
+    const machineEvents = this.machine.ingest(sample);
+    events.push(...machineEvents);
+    // Each escalated absence is a strike against the cohort's allowance.
+    for (const event of machineEvents) {
+      if (event.type === 'absence:started') {
+        events.push(...this.warnings.onAbsenceStarted(event.at));
+      }
+    }
 
     if (sample.faceCount >= 1 && !this.quality.isDegraded()) {
       events.push(...this.liveness.ingest(sample));
@@ -301,9 +312,15 @@ export class PresenceRuntime {
     this.emitter.emitAll(events);
   }
 
+  /** Repeated-absence warnings issued so far this session. */
+  getWarningCount(): number {
+    return this.warnings.getCount();
+  }
+
   /** @internal — exposed for the demo harness and tests. */
   beginSession(at: number = this.now()): void {
-    this.summary = new SessionSummaryBuilder(at);
+    this.summary = new SessionSummaryBuilder(at, this.config.cohort);
+    this.warnings.reset();
     this.running = true;
     this.dispatch([{ type: 'session:started', at }]);
   }

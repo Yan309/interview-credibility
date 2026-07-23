@@ -25,6 +25,13 @@ export type CameraErrorReason =
 
 export type LivenessSignal = 'blink' | 'head-pose' | 'micro-motion';
 
+/**
+ * Consumer cohort. Different interview audiences get different tolerance for
+ * repeated absences — a formal panel is held to a stricter standard than an
+ * internal check. Drives the warning limit; see `warningLimits` in config.
+ */
+export type ConsumerCohort = 'panel' | 'known' | 'internal';
+
 export type PresenceEvent =
   | { type: 'session:started'; at: number }
   | { type: 'session:stopped'; at: number }
@@ -43,6 +50,16 @@ export type PresenceEvent =
    * Like `absence:timeout` this is a REPORT — the host app ends the session.
    */
   | { type: 'quality:timeout'; at: number; reason: QualityReason; durationMs: number }
+  /**
+   * A repeated absence was counted. Advisory — `count` of `limit` used. The host
+   * app can surface "warning 2 of 3" without deciding anything.
+   */
+  | { type: 'warning:issued'; at: number; count: number; limit: number; cohort: ConsumerCohort }
+  /**
+   * The cohort's warning limit has been reached. Like `absence:timeout`, this is a
+   * REPORT — the host app decides whether repeated absences end the interview.
+   */
+  | { type: 'warnings:exhausted'; at: number; count: number; limit: number; cohort: ConsumerCohort }
   | { type: 'camera:error'; at: number; reason: CameraErrorReason };
 
 export type PresenceEventType = PresenceEvent['type'];
@@ -86,4 +103,10 @@ export interface SessionSummary {
   multiFaceOccurrences: number;
   livenessFlags: number;
   degradedPeriods: Array<{ reason: QualityReason; durationMs: number }>;
+  /** Which cohort's tolerance this session was held to. */
+  cohort: ConsumerCohort;
+  /** How many repeated-absence warnings were issued. */
+  warningsIssued: number;
+  /** Whether the cohort's warning limit was reached. */
+  warningsExhausted: boolean;
 }

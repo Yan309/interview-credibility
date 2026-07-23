@@ -1,4 +1,4 @@
-import type { PresenceEvent, QualityReason, SessionSummary } from './types.js';
+import type { ConsumerCohort, PresenceEvent, QualityReason, SessionSummary } from './types.js';
 
 /**
  * Accumulates the post-interview integrity record — the thing a reviewer reads
@@ -18,9 +18,13 @@ export class SessionSummaryBuilder {
   private livenessFlags = 0;
   private degradedPeriods: Array<{ reason: QualityReason; durationMs: number }> = [];
   private degradedSince: { reason: QualityReason; at: number } | null = null;
+  private warningsIssued = 0;
+  private warningsExhausted = false;
+  private cohort: ConsumerCohort;
 
-  constructor(startedAt: number) {
+  constructor(startedAt: number, cohort: ConsumerCohort) {
     this.startedAt = startedAt;
+    this.cohort = cohort;
   }
 
   record(event: PresenceEvent): void {
@@ -39,6 +43,12 @@ export class SessionSummaryBuilder {
         break;
       case 'liveness:suspect':
         this.livenessFlags += 1;
+        break;
+      case 'warning:issued':
+        this.warningsIssued += 1;
+        break;
+      case 'warnings:exhausted':
+        this.warningsExhausted = true;
         break;
       case 'quality:degraded':
         this.degradedSince = { reason: event.reason, at: event.at };
@@ -78,6 +88,9 @@ export class SessionSummaryBuilder {
       multiFaceOccurrences: this.multiFaceOccurrences,
       livenessFlags: this.livenessFlags,
       degradedPeriods: [...this.degradedPeriods],
+      cohort: this.cohort,
+      warningsIssued: this.warningsIssued,
+      warningsExhausted: this.warningsExhausted,
     };
   }
 }

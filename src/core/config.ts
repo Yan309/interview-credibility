@@ -5,6 +5,8 @@
  * Defaults are starting points, not conclusions. They get calibrated in Phase 4.
  */
 
+import type { ConsumerCohort } from './types.js';
+
 export type MultiFacePolicy = 'ignore' | 'flag' | 'treat-as-absent';
 
 export interface LivenessConfig {
@@ -68,6 +70,19 @@ export interface PresenceConfig {
    */
   lightingTimeoutMs: number;
 
+  // ---- repeated-absence warnings ----
+  /** Which cohort's tolerance applies this session. Selects into warningLimits. */
+  cohort: ConsumerCohort;
+  /**
+   * How many escalated absences each cohort is allowed before
+   * `warnings:exhausted` fires. A stricter setting (panel) reflects a formal
+   * interview; a looser one (internal) tolerates more interruption.
+   *
+   * The count is per escalated absence — i.e. per time the candidate is actually
+   * prompted, not per momentary look-away, which never escalates.
+   */
+  warningLimits: Record<ConsumerCohort, number>;
+
   // ---- liveness ----
   liveness: LivenessConfig;
 }
@@ -91,6 +106,12 @@ export const DEFAULT_CONFIG: PresenceConfig = {
   qualityDebounceMs: 2000,
   lightingTimeoutMs: 60000,
 
+  cohort: 'panel',
+  // panel = formal interview panel (strict); known = a known/returning
+  // candidate; internal = internal check (lenient). `internal` was not given a
+  // number by the owner — 8 is a placeholder, confirm before it matters.
+  warningLimits: { panel: 3, known: 5, internal: 8 },
+
   liveness: {
     enabled: true,
     windowMs: 20000,
@@ -108,6 +129,7 @@ export function resolveConfig(overrides: DeepPartial<PresenceConfig> = {}): Pres
     ...DEFAULT_CONFIG,
     ...overrides,
     liveness: { ...DEFAULT_CONFIG.liveness, ...overrides.liveness },
+    warningLimits: { ...DEFAULT_CONFIG.warningLimits, ...overrides.warningLimits },
   } as PresenceConfig;
 
   assertConfig(merged);
@@ -131,6 +153,15 @@ export function assertConfig(config: PresenceConfig): void {
   }
   if (config.targetFps <= 0) throw new Error('targetFps must be positive.');
   if (config.bufferWindowMs <= 0) throw new Error('bufferWindowMs must be positive.');
+
+  for (const [cohort, limit] of Object.entries(config.warningLimits)) {
+    if (!Number.isFinite(limit) || limit < 1) {
+      throw new Error(`warningLimits.${cohort} must be a positive number; got ${limit}.`);
+    }
+  }
+  if (!(config.cohort in config.warningLimits)) {
+    throw new Error(`cohort "${config.cohort}" has no entry in warningLimits.`);
+  }
 }
 
 export type DeepPartial<T> = {

@@ -7,15 +7,14 @@ import { copyText, createRecorder } from './diagnostics.js';
 /**
  * Client-testable harness.
  *
- * Two audiences share this page. A non-technical tester sees only the video, the
- * prompts, and a diagnostics button. Adding `?debug=1` reveals the config sliders,
- * event log and metrics used for calibration.
+ * The instrument view — video, prompts, config sliders, event log, live summary —
+ * is now the only view. The stripped-down "clean" view was removed at the owner's
+ * request: it had layout bugs, and the client wants the metrics visible.
  *
  * The shipping surface is src/core. Nothing in this folder gets integrated.
  */
 
 const params = new URLSearchParams(location.search);
-const DEBUG = params.get('debug') === '1';
 // Escape hatch for the in-app detector below — the UA sniff will eventually be
 // wrong about somebody, and locking out a real tester with no override is worse
 // than letting them through to a clear camera error.
@@ -36,6 +35,7 @@ const el = {
   fps: q<HTMLSpanElement>('#fps'),
   prompt: q<HTMLDivElement>('#prompt'),
   countdown: q<HTMLSpanElement>('#countdown'),
+  warningLine: q<HTMLParagraphElement>('#warning-line'),
   qualityPrompt: q<HTMLDivElement>('#quality-prompt'),
   qualityTitle: q<HTMLHeadingElement>('#quality-title'),
   qualityDetail: q<HTMLParagraphElement>('#quality-detail'),
@@ -57,7 +57,9 @@ function q<T extends Element>(selector: string): T {
 // ---------------------------------------------------------------- setup
 
 el.buildStamp.textContent = `build ${__BUILD__.slice(0, 16).replace('T', ' ')}`;
-if (DEBUG) document.body.classList.add('debug');
+// The instrument is always on now — this class is what reveals the config panel,
+// event log and metrics.
+document.body.classList.add('debug');
 
 // `?delegate=cpu` forces the CPU backend, for isolating GPU-specific behaviour
 // on an unfamiliar device.
@@ -70,10 +72,8 @@ const runtime = new PresenceRuntime({
 
 const diagnostics = createRecorder(runtime);
 
-if (DEBUG) {
-  mountControls(q('#controls'), runtime.config);
-}
-const log = DEBUG ? mountEventLog(q('#event-log')) : () => {};
+mountControls(q('#controls'), runtime.config);
+const log = mountEventLog(q('#event-log'));
 
 // ---------------------------------------------------------------- in-app browsers
 
@@ -187,9 +187,24 @@ runtime.on((event) => {
         'This interview ended automatically because the camera conditions did not allow your presence to be confirmed.',
       );
       break;
+    case 'warning:issued':
+      // Shown inside the return prompt as "warning N of M". The exhausting
+      // warning is handled by warnings:exhausted below, which ends the session,
+      // so the warning line only ever shows counts short of the limit.
+      if (event.count < event.limit) {
+        el.warningLine.textContent = `This is warning ${event.count} of ${event.limit}. Repeated absences may end the interview.`;
+        el.warningLine.hidden = false;
+      }
+      break;
+    case 'warnings:exhausted':
+      el.prompt.hidden = true;
+      endSession(
+        'This interview ended automatically after you left the camera view more times than permitted.',
+      );
+      break;
     case 'liveness:suspect':
       // Advisory only, and for the operator — never shown to the candidate.
-      if (DEBUG) console.warn('[presence] liveness suspect:', event.signals);
+      console.warn('[presence] liveness suspect:', event.signals);
       break;
     case 'camera:error':
       // Mid-session loss. A failure at start() is handled by the catch in begin().
@@ -199,7 +214,7 @@ runtime.on((event) => {
       break;
   }
 
-  if (DEBUG) el.summary.textContent = JSON.stringify(runtime.getSessionSummary(), null, 2);
+  el.summary.textContent = JSON.stringify(runtime.getSessionSummary(), null, 2);
 });
 
 // ---------------------------------------------------------------- lifecycle
@@ -238,7 +253,7 @@ async function begin(): Promise<void> {
     // 4Hz so the displayed second changes promptly after a state transition.
     tickTimer = window.setInterval(tickCountdowns, 250);
 
-    if (DEBUG) showBanner(`Running on ${runtime.getDelegate() ?? 'unknown'} delegate.`);
+    showBanner(`Running on ${runtime.getDelegate() ?? 'unknown'} delegate.`);
   } catch (error) {
     diagnostics.recordError('start', error);
     showErrorScreen(error);
