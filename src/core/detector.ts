@@ -47,10 +47,24 @@ const DEFAULTS = {
 /** Downscale target for the luma sample. Small on purpose — we need a mean, not detail. */
 const LUMA_SAMPLE_SIZE = 32;
 
+/** Where init spent its time — the data that tells download apart from GPU compile. */
+export interface InitTimings {
+  delegate: 'GPU' | 'CPU';
+  /** Whether WASM SIMD is available; the non-SIMD path is much slower. */
+  simd: boolean | null;
+  /** Download + model build (createFromOptions). */
+  buildMs: number;
+  /** First-inference warm-up — the GPU shader compile that hides on mobile. */
+  warmMs: number;
+}
+
+const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
 export class MediaPipeFaceDetector implements FaceDetector {
   private landmarker: FaceLandmarker | null = null;
   private initPromise: Promise<void> | null = null;
   private chosenDelegate: 'GPU' | 'CPU' | null = null;
+  private initTimings: InitTimings | null = null;
   private lastTimestamp = -1;
   private previousLandmarks: NormalizedLandmark[] | null = null;
   private lumaCanvas: HTMLCanvasElement | null = null;
@@ -66,6 +80,11 @@ export class MediaPipeFaceDetector implements FaceDetector {
   /** True once the model is loaded and ready — lets the UI reflect warm-up. */
   get ready(): boolean {
     return this.landmarker !== null;
+  }
+
+  /** Timing breakdown of init, for diagnostics. Null until init() completes. */
+  getInitTimings(): InitTimings | null {
+    return this.initTimings;
   }
 
   /**
@@ -87,6 +106,15 @@ export class MediaPipeFaceDetector implements FaceDetector {
   private async doInit(): Promise<void> {
     const wasmBasePath = this.options.wasmBasePath ?? DEFAULTS.wasmBasePath;
     const modelAssetPath = this.options.modelAssetPath ?? DEFAULTS.modelAssetPath;
+    const t0 = now();
+
+    let simd: boolean | null = null;
+    try {
+      simd = await FilesetResolver.isSimdSupported();
+    } catch {
+      simd = null;
+    }
+
     const fileset = await FilesetResolver.forVisionTasks(wasmBasePath);
 
     const build = async (delegate: 'GPU' | 'CPU'): Promise<FaceLandmarker> =>
@@ -117,7 +145,39 @@ export class MediaPipeFaceDetector implements FaceDetector {
       }
     }
 
-    console.info(`[presence] FaceLandmarker ready on ${this.chosenDelegate}`);
+    const buildMs = now() - t0;
+
+    // Warm-up inference on a blank frame. MediaPipe compiles GPU shaders (or
+    // warms the WASM kernels) on the FIRST detectForVideo, not on load — on a
+    // weak mobile GPU that first call can take minutes. Paying it here, behind
+    // the loading UI, means "ready" is truthful: the interview's first real
+    // frame is then fast, instead of the state sitting on INITIALIZING while the
+    // phone compiles. Two frames because some backends defer work to the second.
+    const w0 = now();
+    try {
+      const canvas =
+        typeof OffscreenCanvas !== 'undefined'
+          ? new OffscreenCanvas(128, 128)
+          : Object.assign(document.createElement('canvas'), { width: 128, height: 128 });
+      this.landmarker.detectForVideo(canvas as unknown as HTMLCanvasElement, 1);
+      this.landmarker.detectForVideo(canvas as unknown as HTMLCanvasElement, 2);
+      this.lastTimestamp = 2;
+    } catch (error) {
+      // Non-fatal: the first real frame simply pays the cost instead.
+      console.warn('[presence] warm-up inference failed (non-fatal)', error);
+    }
+    const warmMs = now() - w0;
+
+    this.initTimings = {
+      delegate: this.chosenDelegate ?? 'CPU',
+      simd,
+      buildMs: Math.round(buildMs),
+      warmMs: Math.round(warmMs),
+    };
+    console.info(
+      `[presence] FaceLandmarker ready on ${this.chosenDelegate} ` +
+        `(build ${Math.round(buildMs)}ms, warm-up ${Math.round(warmMs)}ms, simd=${simd})`,
+    );
   }
 
   detect(video: HTMLVideoElement, at: number): DetectionSample | null {

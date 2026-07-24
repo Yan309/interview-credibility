@@ -94,6 +94,16 @@ export function createRecorder(runtime: PresenceRuntime): DiagnosticsRecorder {
       lines.push(`State           ${runtime.getState()}`);
       lines.push(`Delegate        ${runtime.getDelegate() ?? 'not loaded'}`);
       lines.push(`Measured fps    ${runtime.getMeasuredFps()} (target ${runtime.config.targetFps})`);
+      // Splits the startup wait: a large warm-up figure = GPU shader compile
+      // (the mobile trap); a large build figure = download/model init.
+      const timings = runtime.getInitTimings() as
+        | { delegate: string; simd: boolean | null; buildMs: number; warmMs: number }
+        | null;
+      lines.push(
+        timings
+          ? `Init timing     build ${timings.buildMs}ms · warm-up ${timings.warmMs}ms · simd=${timings.simd}`
+          : 'Init timing     not loaded',
+      );
       lines.push('');
 
       lines.push('--- Session summary ---');

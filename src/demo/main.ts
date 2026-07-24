@@ -62,9 +62,16 @@ el.buildStamp.textContent = `build ${__BUILD__.slice(0, 16).replace('T', ' ')}`;
 // event log and metrics.
 document.body.classList.add('debug');
 
-// `?delegate=cpu` forces the CPU backend, for isolating GPU-specific behaviour
-// on an unfamiliar device.
-const delegate = params.get('delegate')?.toUpperCase() === 'CPU' ? 'CPU' : undefined;
+// Delegate choice. On mobile the WebGL/GPU path compiles shaders on the first
+// inference, which can take *minutes* on a weak phone GPU — the CPU (WASM SIMD)
+// path has no such compile and starts almost immediately, at the cost of a lower
+// frame rate that presence detection tolerates fine. So mobile defaults to CPU;
+// desktop keeps GPU-first (fast compile, faster inference). Override either way
+// with ?delegate=gpu or ?delegate=cpu.
+const forcedDelegate = params.get('delegate')?.toUpperCase();
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const delegate: 'GPU' | 'CPU' | undefined =
+  forcedDelegate === 'CPU' ? 'CPU' : forcedDelegate === 'GPU' ? 'GPU' : isMobile ? 'CPU' : undefined;
 
 const runtime = new PresenceRuntime({
   camera: { videoElement: el.video },

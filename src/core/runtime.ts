@@ -91,6 +91,12 @@ export class PresenceRuntime {
     return detector.delegate ?? null;
   }
 
+  /** Init timing breakdown, for diagnostics. Null until warm/started. */
+  getInitTimings(): unknown {
+    const detector = this.detector as { getInitTimings?: () => unknown };
+    return detector.getInitTimings?.() ?? null;
+  }
+
   /**
    * Loads the model without touching the camera, so the ~15MB download and WASM
    * compile can happen ahead of time — e.g. while a landing screen is shown. The

@@ -343,6 +343,41 @@ guessing the right WASM variant risks a double download. Warming is the safer 90
 
 ---
 
+## 2026-07-24 — Mobile: 4-minute stall was GPU shader compile, not download
+
+**Reported:** on a phone (14 Mbps) the app took ~4 minutes to start detecting after
+"initialization," and Start let the user into the camera screen before anything was
+ready — the readiness gate didn't hold.
+
+**Root cause.** Two things, one underlying:
+
+- The gate only waited for `warmUp()` = model **download + build**. MediaPipe compiles its
+  GPU (WebGL) shaders on the **first `detectForVideo`**, not on load. On a weak mobile GPU
+  that first inference can take minutes. So the button lit "ready" while the real cost was
+  still ahead, during the post-Start INITIALIZING. 14 Mbps → the 15MB download is ~10s, so
+  download was never the 4 minutes.
+- Measured the same compile locally: desktop GPU warm-up 310ms vs CPU 123ms. The gap is
+  the shader compile. On the phone that 310ms becomes minutes.
+
+**Fixes.**
+
+1. **Warm-up inference in `init()`** — after building the landmarker, run two
+   `detectForVideo` calls on a blank 128px canvas to force the shader/kernel compile behind
+   the loading UI. "Ready" is now truthful: the interview's first real frame is fast.
+2. **Mobile defaults to the CPU delegate** (WASM SIMD) — no shader compile, starts almost
+   immediately, at a lower frame rate presence tolerates fine. Desktop keeps GPU-first.
+   `?delegate=gpu` / `?delegate=cpu` override. The delegate decision lives in the demo (UA
+   sniff belongs in the UI layer), passed into the detector.
+3. **Init timings in diagnostics** (`build Xms · warm-up Yms · simd=`) so a slow device
+   reports where the time went — download/build vs GPU compile — instead of guessing.
+
+**Watch:** CPU inference on a weak phone may run below 10fps. Presence still works (buffer +
+hysteresis tolerate it), but if it dips under `lowFpsThreshold` (4) it reads as
+`quality:degraded`. If that bites, lower targetFps on mobile rather than raising the fps
+floor. Not yet measured on a real phone — confirm with the diagnostics block.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub
