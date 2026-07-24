@@ -288,13 +288,23 @@ async function begin(): Promise<void> {
   el.errorRetry.disabled = true;
   el.begin.textContent = 'Starting…';
 
+  // Show the camera screen BEFORE acquiring the stream. On mobile, video.play()
+  // on an element inside a display:none container silently fails to decode: the
+  // element stays at readyState 1, detect() returns null every frame, and the
+  // machine never leaves INITIALIZING — while fps still reads ~10 because the
+  // sample loop keeps spinning. Making it visible first lets the stream decode.
+  // showScreen is synchronous, so getUserMedia is still reached from this tap.
+  showScreen(el.app);
+  el.ended.hidden = true;
+
   try {
-    // getUserMedia must be reached from this tap. Nothing awaits before it.
     await runtime.start();
     running = true;
-    showScreen(el.app);
-    el.ended.hidden = true;
     el.toggle.textContent = 'Stop';
+
+    // Some mobile browsers leave the element paused after a programmatic srcObject
+    // swap; nudge it now that it is on-screen.
+    void el.video.play().catch(() => {});
 
     fpsTimer = window.setInterval(() => {
       el.fps.textContent = `${runtime.getMeasuredFps()} fps`;

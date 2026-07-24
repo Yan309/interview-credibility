@@ -412,6 +412,38 @@ reasoning; confirm on-device via diagnostics.
 
 ---
 
+## 2026-07-24 — THE mobile bug: video played while hidden → never decodes
+
+**Reported (Samsung A33):** button enabled in seconds (CPU path working), then INITIALIZING
+for 4 minutes with **fps reading 9-10**.
+
+**That fps number cracked it.** `getMeasuredFps` counts sample-loop iterations, not
+successful detections. fps 9-10 + stuck INITIALIZING = the loop is spinning fine but
+`detect()` returns null every frame, so the machine never ingests a real sample.
+
+`detect()` returns null when `video.readyState < 2 || videoWidth === 0`. Cause: `begin()`
+called `runtime.start()` — which attaches the camera stream and calls `video.play()` —
+**while `#app` (and the `#video` inside it) was still `hidden` (display:none)**, and only
+made it visible afterward. Desktop Chrome decodes a hidden video anyway, so it worked
+there. Mobile browsers do NOT: `play()` on a display:none video fails to decode, the
+element stays at readyState 1, and detect() returns null forever. The preload/CPU/guard
+fixes were all real, but this was the actual wall.
+
+**Fix.** `begin()` now calls `showScreen(el.app)` BEFORE `runtime.start()`, so the video is
+on-screen when the stream attaches and can decode. Plus a `video.play()` nudge after start
+for browsers that leave the element paused after a srcObject swap. `showScreen` is
+synchronous, so getUserMedia is still reached from the tap gesture (iOS requirement).
+
+Also added `getVideoStatus()` (readyState / videoWidth / paused) to the diagnostics block,
+so any future "stuck INITIALIZING" is one paste away from being confirmed instead of
+reasoned about.
+
+**Lesson:** fps measured the loop, not the work. A "healthy" metric masked a total failure
+for several iterations. When a number looks fine but the outcome is broken, check what the
+number actually counts.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub

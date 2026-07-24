@@ -87,6 +87,17 @@ export class PresenceRuntime {
     return this.camera.getTrackSettings();
   }
 
+  /**
+   * Video element readiness. `readyState < 2` or `videoWidth === 0` means detect()
+   * returns null every frame — the machine then sits on INITIALIZING while the loop
+   * still spins (fps looks fine). This is what tells that state apart from a real
+   * detection problem.
+   */
+  getVideoStatus(): { readyState: number; videoWidth: number; paused: boolean } | null {
+    if (!this.video) return null;
+    return { readyState: this.video.readyState, videoWidth: this.video.videoWidth, paused: this.video.paused };
+  }
+
   /** Which delegate the detector loaded, when it reports one (IC-19). */
   getDelegate(): string | null {
     const detector = this.detector as { delegate?: 'GPU' | 'CPU' | null };

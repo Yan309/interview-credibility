@@ -88,6 +88,14 @@ export function createRecorder(runtime: PresenceRuntime): DiagnosticsRecorder {
       } else {
         lines.push('Camera          not started');
       }
+      const video = runtime.getVideoStatus() as
+        | { readyState: number; videoWidth: number; paused: boolean }
+        | null;
+      lines.push(
+        video
+          ? `Video element   readyState=${video.readyState} width=${video.videoWidth} paused=${video.paused}`
+          : 'Video element   not attached',
+      );
       lines.push('');
 
       lines.push('--- Detection ---');
