@@ -49,6 +49,7 @@ const LUMA_SAMPLE_SIZE = 32;
 
 export class MediaPipeFaceDetector implements FaceDetector {
   private landmarker: FaceLandmarker | null = null;
+  private initPromise: Promise<void> | null = null;
   private chosenDelegate: 'GPU' | 'CPU' | null = null;
   private lastTimestamp = -1;
   private previousLandmarks: NormalizedLandmark[] | null = null;
@@ -62,7 +63,28 @@ export class MediaPipeFaceDetector implements FaceDetector {
     return this.chosenDelegate;
   }
 
-  async init(): Promise<void> {
+  /** True once the model is loaded and ready — lets the UI reflect warm-up. */
+  get ready(): boolean {
+    return this.landmarker !== null;
+  }
+
+  /**
+   * Idempotent and safe to call before the camera exists, so the ~15MB download
+   * and WASM compile can be warmed during the landing screen rather than after
+   * the user taps Start. A second call while the first is in flight returns the
+   * same promise; a call after success returns immediately.
+   */
+  init(): Promise<void> {
+    if (this.landmarker) return Promise.resolve();
+    this.initPromise ??= this.doInit().catch((error) => {
+      // Reset so a later Start can retry rather than being stuck on a dead promise.
+      this.initPromise = null;
+      throw error;
+    });
+    return this.initPromise;
+  }
+
+  private async doInit(): Promise<void> {
     const wasmBasePath = this.options.wasmBasePath ?? DEFAULTS.wasmBasePath;
     const modelAssetPath = this.options.modelAssetPath ?? DEFAULTS.modelAssetPath;
     const fileset = await FilesetResolver.forVisionTasks(wasmBasePath);
@@ -153,6 +175,9 @@ export class MediaPipeFaceDetector implements FaceDetector {
   close(): void {
     this.landmarker?.close();
     this.landmarker = null;
+    // Clear the cached promise too, or a later init() would resolve instantly
+    // without rebuilding the closed landmarker.
+    this.initPromise = null;
     this.chosenDelegate = null;
     this.lastTimestamp = -1;
     this.previousLandmarks = null;

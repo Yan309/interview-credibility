@@ -92,6 +92,27 @@ export class PresenceRuntime {
   }
 
   /**
+   * Loads the model without touching the camera, so the ~15MB download and WASM
+   * compile can happen ahead of time — e.g. while a landing screen is shown. The
+   * subsequent start() then only needs camera permission and is near-instant.
+   *
+   * Best-effort: any failure here is swallowed, because start() runs init() again
+   * and surfaces the error properly through the camera:error path.
+   */
+  async warmUp(): Promise<void> {
+    try {
+      await this.detector.init();
+    } catch {
+      /* start() will retry and report */
+    }
+  }
+
+  /** True once the detector is loaded and start() will be fast. */
+  isWarm(): boolean {
+    return (this.detector as { ready?: boolean }).ready ?? false;
+  }
+
+  /**
    * Acquires the camera, loads the model, and starts sampling.
    *
    * Camera failures are emitted as `camera:error` AND rethrown: the host app needs

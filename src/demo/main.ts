@@ -28,6 +28,7 @@ const el = {
   errorDetail: q<HTMLParagraphElement>('#error-detail'),
   errorRetry: q<HTMLButtonElement>('#error-retry'),
   begin: q<HTMLButtonElement>('#begin'),
+  prepHint: q<HTMLParagraphElement>('#prep-hint'),
   app: q<HTMLElement>('#app'),
   toggle: q<HTMLButtonElement>('#toggle'),
   statePill: q<HTMLSpanElement>('#state-pill'),
@@ -71,6 +72,18 @@ const runtime = new PresenceRuntime({
 });
 
 const diagnostics = createRecorder(runtime);
+
+// Preload the model now, while the landing screen is up. The ~15MB download and
+// WASM compile is the real cost behind the long "INITIALIZING" — doing it here
+// overlaps it with the user reading instructions, so tapping Start is near
+// instant. If they tap before it finishes, start()'s own init() awaits the same
+// in-flight load rather than starting a second one.
+if (!isInAppBrowser() || FORCE) {
+  el.prepHint.hidden = false;
+  void runtime.warmUp().then(() => {
+    el.prepHint.hidden = true;
+  });
+}
 
 mountControls(q('#controls'), runtime.config);
 const log = mountEventLog(q('#event-log'));

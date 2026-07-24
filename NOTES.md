@@ -298,6 +298,46 @@ accepted tradeoff, since the point is for them to see it working and report deta
 
 ---
 
+## 2026-07-24 — Slow "INITIALIZING" on Vercel: measured, and fixed with preload
+
+**Reported:** ~20s stuck on INITIALIZING on the Vercel deploy (longer on phone), but fast
+on stop/restart until a refresh.
+
+**Measured against the live deploy** (interview-credibility-mrsg.vercel.app), not guessed:
+
+| Asset | Cold (network) | Cached refetch |
+|---|---|---|
+| face_landmarker.task | ~7.0s | 38ms |
+| vision_wasm_internal.wasm | ~6.6s | 65ms |
+
+- Cache headers ARE live and correct: `public, max-age=31536000, immutable`. ✓
+- Brotli on (`content-encoding: br`), Vercel edge `x-vercel-cache: HIT`. ✓
+- Cached refetch 38–65ms → **browser caching works.** Caching was never the problem.
+
+So the cost is the one-time download of ~15MB (decompressed; ~7–8MB on the wire) plus WASM
+compile + GPU init, all inside `detector.init()`. Local is instant only because the files
+come off disk. The sandbox link measured 0.4 Mbps, which is why cold was ~7s each there; a
+weak phone connection is the same story → "even longer on phone." The restart-fast /
+refresh-slow pattern is explained: the compiled model lives in page memory (restart reuses
+it), and a refresh discards it — the download is then cache-served but the compile/init
+recurs.
+
+**Fix: preload during the landing screen.** `detector.init()` is now idempotent and
+concurrency-deduped (an in-flight call is shared; a completed one returns instantly;
+`close()` clears the cached promise). `PresenceRuntime.warmUp()` runs it without the camera.
+The demo calls warmUp() at page load, so the download+compile overlaps with the user
+reading the landing text. By the time they tap Start, init() is done and only camera
+permission + the 2s buffer remain. Verified headlessly: the detector reaches warm (GPU,
+model loaded) during page load with no camera. A "Preparing the camera model…" hint shows
+on the landing screen until ready, and Start is tappable throughout (start() awaits the
+same in-flight init).
+
+**Not done, possible further wins if still too slow:** the model is only fetched when the
+JS executes — an `<link rel=preload>` in index.html could start it a beat earlier, but
+guessing the right WASM variant risks a double download. Warming is the safer 90%.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub
