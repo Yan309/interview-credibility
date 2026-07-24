@@ -40,10 +40,13 @@
           <li>You will see yourself on screen.</li>
           <li>If you move out of view, a message will ask you to return.</li>
         </ul>
-        <button id="begin" class="btn btn--primary">Start camera</button>
-        <p id="prep-hint" class="screen__hint" hidden>
-          Preparing the camera model… you can press Start now, and it will begin as
-          soon as this finishes.
+        <!-- Disabled until the model has loaded. Enabled by main.ts once warm, so
+             the user never taps a button that appears to do nothing. -->
+        <button id="begin" class="btn btn--primary" disabled>Preparing…</button>
+        <p id="prep-hint" class="screen__hint">
+          <span class="spinner" aria-hidden="true"></span>
+          Getting the camera ready. The first visit downloads a one-time setup
+          (about 15&nbsp;MB) and is saved for next time.
         </p>
       </div>
     </section>

@@ -111,6 +111,29 @@ body.debug .pill.debug-only { display: inline-block !important; }
   font-size: 0.875rem;
   padding: 0.4rem 1rem;
 }
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Shown beside the "Getting the camera ready" hint while the model loads. */
+.spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.45em;
+  vertical-align: -0.12em;
+  border: 2px solid var(--muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2s; }
+}
 
 .pill {
   border-radius: 999px;

@@ -73,16 +73,38 @@ const runtime = new PresenceRuntime({
 
 const diagnostics = createRecorder(runtime);
 
-// Preload the model now, while the landing screen is up. The ~15MB download and
-// WASM compile is the real cost behind the long "INITIALIZING" — doing it here
-// overlaps it with the user reading instructions, so tapping Start is near
-// instant. If they tap before it finishes, start()'s own init() awaits the same
-// in-flight load rather than starting a second one.
+// Preload the model now, while the landing screen is up, and keep Start disabled
+// until it is ready. The ~15MB download + WASM compile is the real cost behind the
+// long "INITIALIZING"; the browser must download the model once to run detection
+// locally, so it cannot be avoided — but it should never be invisible. Gating the
+// button means the user is never left tapping a button that appears to do nothing.
 if (!isInAppBrowser() || FORCE) {
-  el.prepHint.hidden = false;
-  void runtime.warmUp().then(() => {
-    el.prepHint.hidden = true;
-  });
+  setPrepState('preparing');
+  void runtime.warmUp().then(() => setPrepState(runtime.isWarm() ? 'ready' : 'failed'));
+}
+
+/** Drives the landing-screen readiness: button enabled/label and the status hint. */
+function setPrepState(state: 'preparing' | 'ready' | 'failed'): void {
+  switch (state) {
+    case 'preparing':
+      el.begin.disabled = true;
+      el.begin.textContent = 'Preparing…';
+      el.prepHint.hidden = false;
+      break;
+    case 'ready':
+      el.begin.disabled = false;
+      el.begin.textContent = 'Start camera';
+      el.prepHint.hidden = true;
+      break;
+    case 'failed':
+      // Enable anyway: tapping Start re-runs init() and surfaces the real error
+      // on the error screen, which beats a permanently dead button.
+      el.begin.disabled = false;
+      el.begin.textContent = 'Start camera';
+      el.prepHint.textContent = 'Setup did not finish loading. Press Start to try again.';
+      el.prepHint.hidden = false;
+      break;
+  }
 }
 
 mountControls(q('#controls'), runtime.config);

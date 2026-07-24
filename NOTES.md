@@ -328,9 +328,14 @@ concurrency-deduped (an in-flight call is shared; a completed one returns instan
 The demo calls warmUp() at page load, so the download+compile overlaps with the user
 reading the landing text. By the time they tap Start, init() is done and only camera
 permission + the 2s buffer remain. Verified headlessly: the detector reaches warm (GPU,
-model loaded) during page load with no camera. A "Preparing the camera model…" hint shows
-on the landing screen until ready, and Start is tappable throughout (start() awaits the
-same in-flight init).
+model loaded) during page load with no camera.
+
+**Start is gated on readiness** (owner request): the button starts disabled and labelled
+"Preparing…" with a spinner, and enables to "Start camera" only once the model is warm.
+The download can't be avoided — the browser must fetch the model once to run detection
+locally — but it is never invisible: the user sees a clear preparing state and starts when
+ready, instead of tapping a button that appears to do nothing. On a warm failure the
+button enables anyway, so a tap can retry and surface the real error.
 
 **Not done, possible further wins if still too slow:** the model is only fetched when the
 JS executes — an `<link rel=preload>` in index.html could start it a beat earlier, but
