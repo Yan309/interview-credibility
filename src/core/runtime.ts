@@ -43,6 +43,8 @@ export class PresenceRuntime {
   private frameHandle: number | null = null;
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private lastSampleAt: number | null = null;
+  /** Duration of the most recent detect(), to tell slow inference from a sleep. */
+  private lastDetectMs = 0;
   private sampleTimestamps: number[] = [];
   private qualityUnusableSince: number | null = null;
   private qualityTimeoutFired = false;
@@ -220,12 +222,22 @@ export class PresenceRuntime {
     // Discontinuity guard (IC-21). A closed laptop lid, a suspended tab, or a
     // resumed machine leaves a gap that would otherwise be read as one enormous
     // absence — and time the candidate out for something entirely harmless.
-    if (this.lastSampleAt !== null && at - this.lastSampleAt > this.discontinuityThresholdMs()) {
-      this.machine.reset(at);
-      this.quality.reset();
-      this.liveness.reset();
-      this.lastSampleAt = at;
-      return;
+    //
+    // But we must NOT mistake slow inference for a discontinuity. On a weak phone
+    // a single CPU detect() can take several seconds; comparing the raw gap to the
+    // threshold then fires on every frame, resetting to INITIALIZING forever. So
+    // subtract the time our own last detect() took: a real sleep leaves a large
+    // IDLE gap, slow-but-continuous inference does not.
+    if (this.lastSampleAt !== null) {
+      const idleGap = at - this.lastSampleAt - this.lastDetectMs;
+      if (idleGap > this.discontinuityThresholdMs()) {
+        this.machine.reset(at);
+        this.quality.reset();
+        this.liveness.reset();
+        this.lastSampleAt = at;
+        this.lastDetectMs = 0;
+        return;
+      }
     }
     this.lastSampleAt = at;
 
@@ -236,12 +248,15 @@ export class PresenceRuntime {
     }
 
     let sample;
+    const detectStart = this.now();
     try {
       sample = this.detector.detect(video, at);
     } catch (error) {
+      this.lastDetectMs = 0;
       console.error('[presence] detect() threw', error);
       return;
     }
+    this.lastDetectMs = this.now() - detectStart;
 
     if (sample) this.processSample(sample);
   }

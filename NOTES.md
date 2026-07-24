@@ -378,6 +378,40 @@ floor. Not yet measured on a real phone — confirm with the diagnostics block.
 
 ---
 
+## 2026-07-24 — Phone stuck 7min on INITIALIZING: discontinuity guard misfired
+
+**Reported:** with CPU delegate on mobile, Start enabled instantly (expected — CPU has no
+shader compile) but the app then sat on INITIALIZING for 7+ minutes.
+
+**Root cause.** The discontinuity guard (IC-21) compared the raw gap between samples to a
+2s threshold and reset the machine if exceeded — meant to catch a laptop-lid-close. But on
+a weak phone a single CPU `detect()` on a 640x480 frame takes **longer than 2s**, so every
+frame looked like a sleep → `machine.reset()` every frame → the buffer never filled →
+INITIALIZING forever. The guard could not tell slow inference from a real time gap.
+
+**Fixes.**
+
+1. **Idle-based discontinuity.** Subtract the time our own last `detect()` took from the
+   gap. A real sleep leaves a large IDLE gap; slow-but-continuous inference does not. So
+   inference can be arbitrarily slow without tripping the guard, while a genuine
+   sleep/resume still resets. `lastDetectMs` tracks the previous inference duration.
+2. **Lower mobile capture resolution** (320x240 vs 640x480). Inference cost scales with
+   pixel count, so ~4x faster on the CPU path — likely the difference between the phone
+   keeping up and stalling.
+
+**Still unconfirmed on a real phone:** whether 320x240 CPU inference is fast enough for a
+usable frame rate. If `getMeasuredFps` (in the diagnostics block) comes back under
+`lowFpsThreshold` (4), it will read as `quality:degraded` (unstable feed) instead of
+stalling — progress, but then the options are lower res again, dropping the blendshape/
+matrix outputs (disables liveness), or GPU-on-mobile with the 4-min compile hidden behind
+the warm-up spinner. The diagnostics fps number decides which.
+
+**Note:** the sample loop / discontinuity guard is not unit-tested — it is coupled to a
+real `<video>` and `requestVideoFrameCallback`, which the node test env lacks. Verified by
+reasoning; confirm on-device via diagnostics.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub

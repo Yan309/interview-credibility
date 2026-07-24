@@ -74,7 +74,14 @@ const delegate: 'GPU' | 'CPU' | undefined =
   forcedDelegate === 'CPU' ? 'CPU' : forcedDelegate === 'GPU' ? 'GPU' : isMobile ? 'CPU' : undefined;
 
 const runtime = new PresenceRuntime({
-  camera: { videoElement: el.video },
+  camera: {
+    videoElement: el.video,
+    // Capture at a lower resolution on mobile. Inference cost scales with pixel
+    // count, so 320x240 vs 640x480 is roughly a 4x speedup on the CPU path — the
+    // difference between a phone keeping up and stalling. A phone screen shows
+    // the preview fine at this size.
+    ...(isMobile ? { width: 320, height: 240 } : {}),
+  },
   detector: new MediaPipeFaceDetector(delegate ? { delegate } : {}),
 });
 
