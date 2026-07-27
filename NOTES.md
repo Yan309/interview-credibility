@@ -508,6 +508,49 @@ But not applying it until the captured error confirms the cause.
 
 ---
 
+## 2026-07-27 — ACTUAL ROOT CAUSE: windowIsFull float-boundary bug (all platforms)
+
+Android Chrome diagnostics, final layer: `Detect frames calls=200 ok=200 null=0 threw=0`
+over a 20s session, yet `State INITIALIZING` and only `session:started` ever emitted. So
+detection was **perfect** — 200 good samples reached the runtime — and the STATE MACHINE
+never advanced. Not camera, not loop, not MediaPipe. My bug.
+
+**The bug.** `windowIsFull(now)` checked `now - oldest.at >= bufferWindowMs`, but `prune`
+(same timestamp, runs immediately before) had already dropped every sample older than
+`now - bufferWindowMs`. So the oldest survivor is always *younger* than the window, and the
+check can only pass on an exact floating-point coincidence — a sample landing at precisely
+`now - bufferWindowMs`. Whether that ever happens is pure frame-timing luck:
+
+- Clean 10fps (100ms, a divisor of the 2000ms window) → a sample lands on the boundary →
+  passes. **This is why the unit tests (100ms samples) never caught it.**
+- Desktop/iOS real timing → coincidence lands within a few seconds → "works," but note it
+  took 6-7s / 4-5s to leave INITIALIZING when it should be ~2s. That extra time WAS the bug,
+  hiding in plain sight.
+- Android Chrome ~11fps (rVFC throttle overshoots 10 → ~91ms spacing, not a divisor of
+  2000) → coincidence never lands → hangs for minutes.
+
+One bug explained every platform's number simultaneously — including the desktop "6-7s"
+I'd waved off as normal boot time.
+
+**Fix.** Anchor the window to the FIRST sample since (re)init: `firstSampleAt`, set once per
+INITIALIZING run, and `windowIsFull = now - firstSampleAt >= bufferWindowMs`. Deterministic
+on every device, independent of frame spacing; re-anchored in `reset()` so it re-warms after
+a discontinuity. Desktop/iOS should now also leave INITIALIZING at a clean ~2s.
+
+Regression test `tests/frame-timing.test.ts` feeds deliberately un-aligned spacings
+(90.9ms ≈ 11fps, plus 83.3/91/97/111/133) — all of which hung under the old logic.
+
+**Lessons.**
+- The whole Android saga was a *stack* of real-but-secondary issues (rVFC dead loop, video
+  decode, delegate) layered over this one primary bug. Each fix peeled a layer and revealed
+  the next; only the per-frame `Detect frames` instrumentation exposed the bottom.
+- Tests that only exercise the happy, grid-aligned timing hide boundary bugs. The fixture
+  spacing (100ms) accidentally matched the one value that works.
+- "Slightly slow but working" (desktop 6-7s) was the same bug as "totally broken" (Android).
+  A mild symptom on one platform and a fatal one on another can share a cause.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub

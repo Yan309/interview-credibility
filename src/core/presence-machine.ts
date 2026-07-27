@@ -36,6 +36,8 @@ export class PresenceMachine {
   /** While suspended, absence escalation timers are frozen. See `setSuspended`. */
   private suspended = false;
   private lastSampleAt: number | null = null;
+  /** Timestamp of the first sample since (re)initialising — anchors windowIsFull. */
+  private firstSampleAt: number | null = null;
 
   constructor(private readonly config: PresenceConfig) {}
 
@@ -92,6 +94,7 @@ export class PresenceMachine {
     this.buffer.push({ at: sample.at, present });
     this.prune(sample.at);
     this.lastSampleAt = sample.at;
+    this.firstSampleAt ??= sample.at;
 
     events.push(...this.evaluateMultiFace(sample));
 
@@ -189,6 +192,8 @@ export class PresenceMachine {
     this.multiFaceSince = null;
     this.multiFaceReported = false;
     this.lastSampleAt = at;
+    // Re-anchor the warm-up window so it re-fills after a discontinuity.
+    this.firstSampleAt = null;
     if (this.state !== 'TIMED_OUT' && this.state !== 'CAMERA_ERROR') {
       this.state = 'INITIALIZING';
     }
@@ -218,9 +223,21 @@ export class PresenceMachine {
     return [];
   }
 
+  /**
+   * True once we have `bufferWindowMs` of history to judge over.
+   *
+   * Anchored to the FIRST sample, not the oldest buffered one. The obvious
+   * `now - oldest.at >= bufferWindowMs` is a trap: `prune` (same timestamp, runs
+   * first) has already dropped everything older than `now - bufferWindowMs`, so
+   * the oldest survivor is always younger than the window — the check then only
+   * passes on an exact floating-point coincidence where a sample lands at
+   * precisely `now - bufferWindowMs`. Whether that ever happens depends on frame
+   * timing: at a clean 10fps it lines up, at Android Chrome's ~11fps it never
+   * does, and the machine hangs in INITIALIZING forever. Elapsed-since-first is
+   * deterministic on every device.
+   */
   private windowIsFull(now: number): boolean {
-    const oldest = this.buffer[0];
-    return oldest !== undefined && now - oldest.at >= this.config.bufferWindowMs;
+    return this.firstSampleAt !== null && now - this.firstSampleAt >= this.config.bufferWindowMs;
   }
 
   private prune(now: number): void {
