@@ -101,6 +101,8 @@ export function createRecorder(runtime: PresenceRuntime): DiagnosticsRecorder {
       lines.push('--- Detection ---');
       lines.push(`State           ${runtime.getState()}`);
       lines.push(`Delegate        ${runtime.getDelegate() ?? 'not loaded'}`);
+      // 'timer' here on Android Chrome confirms the rVFC watchdog kicked in.
+      lines.push(`Loop driver     ${(runtime as { getLoopDriver?: () => string | null }).getLoopDriver?.() ?? 'n/a'}`);
       lines.push(`Measured fps    ${runtime.getMeasuredFps()} (target ${runtime.config.targetFps})`);
       // Splits the startup wait: a large warm-up figure = GPU shader compile
       // (the mobile trap); a large build figure = download/model init.

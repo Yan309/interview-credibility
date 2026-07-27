@@ -42,6 +42,8 @@ export class PresenceRuntime {
   private video: HTMLVideoElement | null = null;
   private frameHandle: number | null = null;
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private rvfcWatchdog: ReturnType<typeof setTimeout> | null = null;
+  private loopDriver: 'rvfc' | 'timer' | null = null;
   private lastSampleAt: number | null = null;
   /** Duration of the most recent detect(), to tell slow inference from a sleep. */
   private lastDetectMs = 0;
@@ -80,6 +82,15 @@ export class PresenceRuntime {
    */
   getMeasuredFps(): number {
     return this.sampleTimestamps.length;
+  }
+
+  /**
+   * Which driver runs the sample loop: 'rvfc' (per-frame callback) or 'timer'
+   * (the fallback used on Firefox, and on Android Chrome where rVFC never fires).
+   * Null before start().
+   */
+  getLoopDriver(): 'rvfc' | 'timer' | null {
+    return this.loopDriver;
   }
 
   /** Actual camera settings as negotiated with the device. Null before start(). */
@@ -181,42 +192,60 @@ export class PresenceRuntime {
    * Sampling is decoupled from render (IC-20).
    *
    * `requestVideoFrameCallback` fires per decoded video frame rather than per
-   * repaint, so we never contend with the interview UI's animation frames. It is
-   * also throttled hard by a backgrounded tab — which is correct here: that must
-   * surface as `low-fps`, never as the candidate having left.
+   * repaint, so we never contend with the interview UI's animation frames, and it
+   * throttles hard on a backgrounded tab — which we want (that surfaces as
+   * `low-fps`, never as the candidate having left).
    *
-   * Where it is unsupported (Firefox), setInterval is the fallback.
+   * BUT: Android Chrome exposes `requestVideoFrameCallback` yet never fires it for
+   * `MediaStream` (camera) sources — a real, load-bearing bug. Testing that the
+   * function merely *exists* therefore commits us to a loop that never ticks, and
+   * detection sits on INITIALIZING forever (Firefox on the same phone works only
+   * because it lacks rVFC and hits the timer path). So we test the *capability*:
+   * start rVFC, and if no frame callback has landed shortly after, fall back to a
+   * `setInterval` that runs regardless of frame presentation. Capability, not
+   * UA-sniffing — the latter can't be trusted (iPads report as desktop, etc.).
    */
   private startLoop(video: HTMLVideoElement): void {
     const minGapMs = 1000 / this.config.targetFps;
 
-    const hasFrameCallback = typeof video.requestVideoFrameCallback === 'function';
-
-    if (hasFrameCallback) {
-      // Throttle to targetFps: cameras deliver 30fps and we do not need it.
-      //
-      // The tolerance matters. Frames arrive on a ~33ms grid, so a strict
-      // `elapsed >= 100ms` test skips the frame at 100ms and waits for 133ms —
-      // yielding ~7.5fps while targetFps says 10. Allowing a frame that lands
-      // fractionally early snaps sampling back onto the 100ms cadence.
-      const tolerance = minGapMs * 0.2;
-
-      const onFrame = (): void => {
+    const runTimerLoop = (): void => {
+      if (this.intervalHandle !== null) return;
+      this.loopDriver = 'timer';
+      this.intervalHandle = setInterval(() => {
         if (!this.running) return;
-        const at = this.now();
-        if (this.lastSampleAt === null || at - this.lastSampleAt >= minGapMs - tolerance) {
-          this.sampleOnce(video, at);
-        }
-        this.frameHandle = video.requestVideoFrameCallback(onFrame);
-      };
-      this.frameHandle = video.requestVideoFrameCallback(onFrame);
+        this.sampleOnce(video, this.now());
+      }, minGapMs);
+    };
+
+    if (typeof video.requestVideoFrameCallback !== 'function') {
+      runTimerLoop();
       return;
     }
+    this.loopDriver = 'rvfc';
 
-    this.intervalHandle = setInterval(() => {
-      if (!this.running) return;
-      this.sampleOnce(video, this.now());
-    }, minGapMs);
+    // Throttle to targetFps: cameras deliver 30fps and we do not need it. The 20%
+    // tolerance stops a strict `elapsed >= 100ms` test from skipping the 100ms
+    // frame and waiting for 133ms (which would yield ~7.5fps at targetFps 10).
+    const tolerance = minGapMs * 0.2;
+    let rvfcFired = false;
+
+    const onFrame = (): void => {
+      rvfcFired = true;
+      // If the watchdog already fell back to the timer, let this rVFC chain die.
+      if (this.intervalHandle !== null || !this.running) return;
+      const at = this.now();
+      if (this.lastSampleAt === null || at - this.lastSampleAt >= minGapMs - tolerance) {
+        this.sampleOnce(video, at);
+      }
+      this.frameHandle = video.requestVideoFrameCallback(onFrame);
+    };
+    this.frameHandle = video.requestVideoFrameCallback(onFrame);
+
+    // Watchdog: if rVFC hasn't fired once within a second of starting, it is the
+    // broken Android-Chrome implementation. Switch to the timer loop.
+    this.rvfcWatchdog = setTimeout(() => {
+      if (!rvfcFired && this.running) runTimerLoop();
+    }, 1000);
   }
 
   private stopLoop(): void {
@@ -224,8 +253,11 @@ export class PresenceRuntime {
       this.video.cancelVideoFrameCallback?.(this.frameHandle);
     }
     if (this.intervalHandle !== null) clearInterval(this.intervalHandle);
+    if (this.rvfcWatchdog !== null) clearTimeout(this.rvfcWatchdog);
     this.frameHandle = null;
     this.intervalHandle = null;
+    this.rvfcWatchdog = null;
+    this.loopDriver = null;
     this.lastSampleAt = null;
   }
 

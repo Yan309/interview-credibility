@@ -444,6 +444,42 @@ number actually counts.
 
 ---
 
+## 2026-07-24 — ROOT CAUSE of Android stall: rVFC never fires for camera streams
+
+**Confirmed by differential test, not inference:** Firefox on the *same* Android phone works
+in 5-6s; Chrome on Android sits on INITIALIZING for minutes. Same device, same camera, same
+model — only the sample-loop driver differs. That isolates it completely.
+
+**Root cause.** The sample loop is driven by `requestVideoFrameCallback` (rVFC). The code
+selected it with `typeof video.requestVideoFrameCallback === 'function'` — testing that the
+API *exists*, not that it *works*. **Android Chrome exposes rVFC but never fires it for
+`MediaStream` (camera) sources.** So on Android Chrome the loop was scheduled and never
+ticked: zero frames to the detector, INITIALIZING forever. Firefox lacks rVFC entirely →
+hit the `setInterval` fallback → worked. iOS/desktop fire rVFC correctly → worked.
+
+This also retroactively explains the earlier "4-minute GPU" and "stuck on CPU" Android
+tests: the loop was dead in all of them, so delegate/resolution/decode never mattered on
+Android. We had been fixing real-but-irrelevant things (compile, inference, decode) while
+the loop itself never ran.
+
+**Fix (capability, not UA-sniff).** Start rVFC, but arm a 1s watchdog: if no frame callback
+has fired, fall back to the `setInterval` loop, which runs regardless of frame presentation.
+Where rVFC works it's used unchanged; where it's broken we detect the actual failure and
+switch. Deliberately behavioural, not UA-based — UA sniffing already burned us (iPads report
+as desktop). Added `getLoopDriver()` ('rvfc' | 'timer') to the diagnostics so an Android run
+now shows `Loop driver: timer`, confirming the watchdog engaged.
+
+**Kept constant on purpose:** CPU delegate + 320x240 on mobile were band-aids for wrong
+hypotheses, but I left them untouched so this deploy changes exactly one variable. Android's
+next test will show its *true* inference speed (fps) for the first time — then decide whether
+CPU/GPU/resolution need revisiting.
+
+**Lesson (again):** a feature-detection check that tests existence instead of behaviour is a
+trap when a browser ships a broken-but-present API. Prefer verifying the capability actually
+fires.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub
