@@ -480,6 +480,34 @@ fires.
 
 ---
 
+## 2026-07-27 — Android Chrome, layer 2: loop runs, video ready, machine starved
+
+The rVFC watchdog fixed the dead loop. A real Android Chrome diagnostics
+(Chrome 150, Android 10) then showed the NEXT layer:
+
+- `Loop driver: rvfc` (rVFC actually fired here — watchdog not even needed on this
+  device/build), `Measured fps: 11`, `Video element readyState=4 width=240 paused=false`,
+  `Delegate CPU`, `simd=true`, build 1938ms / warm-up 123ms.
+- **State INITIALIZING, and the only event ever emitted was `session:started`.**
+
+So: loop alive at 11fps, video fully decoded, model loaded — yet not one detection
+reaches the state machine. That is the signature of `detectForVideo` throwing every
+frame and being swallowed by sampleOnce's `console.error` (which the diagnostics never
+captured). Camera and loop are both exonerated; the failure is inside detect().
+
+**Instrumentation added (no behaviour change):** per-frame detect tally
+(`calls / ok / null / threw`) plus the swallowed error message, surfaced in the
+diagnostics as `Detect frames …` and `Detect error …`. Next Android paste shows exactly
+which: `threw>0` with a message = MediaPipe throwing (and what); `null` high =
+video-not-ready timing; `ok` high with no events = a state-machine bug. No more inferring.
+
+**Leading guess to confirm:** MediaPipe's `detectForVideo(HTMLVideoElement)` failing on
+Android Chrome's GL image-upload path even under the CPU delegate — a documented class of
+issue with a known workaround (draw the frame to a canvas and pass the canvas instead).
+But not applying it until the captured error confirms the cause.
+
+---
+
 ## Open threads
 
 - **Does the interview client already hold a `MediaStream`?** Blocks IC-11. The stub

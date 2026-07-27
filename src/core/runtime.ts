@@ -44,6 +44,8 @@ export class PresenceRuntime {
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private rvfcWatchdog: ReturnType<typeof setTimeout> | null = null;
   private loopDriver: 'rvfc' | 'timer' | null = null;
+  /** Per-frame outcome tally, so a silently-failing detect() is visible in diagnostics. */
+  private detectStats = { calls: 0, ok: 0, nullReturns: 0, threw: 0, lastError: null as string | null };
   private lastSampleAt: number | null = null;
   /** Duration of the most recent detect(), to tell slow inference from a sleep. */
   private lastDetectMs = 0;
@@ -91,6 +93,16 @@ export class PresenceRuntime {
    */
   getLoopDriver(): 'rvfc' | 'timer' | null {
     return this.loopDriver;
+  }
+
+  /**
+   * Per-frame detect() outcomes. `ok` counts real samples that reached the state
+   * machine; `nullReturns` is video-not-ready; `threw` is a swallowed exception,
+   * with the message in `lastError`. This is what tells "loop runs but nothing
+   * happens" apart into its actual cause.
+   */
+  getDetectStats(): { calls: number; ok: number; nullReturns: number; threw: number; lastError: string | null } {
+    return { ...this.detectStats };
   }
 
   /** Actual camera settings as negotiated with the device. Null before start(). */
@@ -290,18 +302,31 @@ export class PresenceRuntime {
       this.sampleTimestamps.shift();
     }
 
+    this.detectStats.calls += 1;
     let sample;
     const detectStart = this.now();
     try {
       sample = this.detector.detect(video, at);
     } catch (error) {
+      // detect() swallowing an exception here is how a whole session can look
+      // "healthy" (loop spinning, fps fine) while the machine is starved. Capture
+      // it so the diagnostics show it instead of it vanishing into console.error.
+      this.detectStats.threw += 1;
+      this.detectStats.lastError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       this.lastDetectMs = 0;
       console.error('[presence] detect() threw', error);
       return;
     }
     this.lastDetectMs = this.now() - detectStart;
 
-    if (sample) this.processSample(sample);
+    if (sample) {
+      this.detectStats.ok += 1;
+      this.processSample(sample);
+    } else {
+      // Non-null vs null tells video-not-ready (readyState<2) apart from a real
+      // detection reaching the machine.
+      this.detectStats.nullReturns += 1;
+    }
   }
 
   /** Gap beyond which we assume a discontinuity rather than a slow frame. */
@@ -406,6 +431,7 @@ export class PresenceRuntime {
   beginSession(at: number = this.now()): void {
     this.summary = new SessionSummaryBuilder(at, this.config.cohort);
     this.warnings.reset();
+    this.detectStats = { calls: 0, ok: 0, nullReturns: 0, threw: 0, lastError: null };
     this.running = true;
     this.dispatch([{ type: 'session:started', at }]);
   }
